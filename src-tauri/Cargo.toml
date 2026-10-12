@@ -1,0 +1,72 @@
+[package]
+name = "activescreentime_tauri"
+version = "0.1.0"
+description = "A native, lightweight Windows screen time and productivity tracker"
+authors = ["Flunty"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "activescreentime_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1.10.4"
+rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
+base64 = "0.22"
+image = "0.25"
+win-icon-extractor = "0.3.0"
+chrono = "0.4.45"
+crossbeam-channel = "0.5.17"
+windows = { version = "0.58.0", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Com",
+    "Win32_System_IO",
+    "Win32_System_SystemInformation",
+    "Data_Xml_Dom",
+    "UI_Notifications",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_HiDpi",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_System_Registry",
+    "Win32_System_Pipes",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_WinRT",
+    "Media_Control",
+    "Foundation_Collections",
+] }
+winreg = "0.56.0"
+dirs-next = "2.0.0"
+csv = "1.4.0"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+boa_engine = "0.22.0"
+tauri-plugin-dialog = "2"
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

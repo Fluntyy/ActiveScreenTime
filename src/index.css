@@ -1,0 +1,217 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Google Sans from Local Assets ── */
+@font-face {
+  font-family: 'Google Sans';
+  src: url('/fonts/GoogleSans.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Google Sans';
+  src: url('/fonts/GoogleSans-Italic.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: italic;
+}
+
+/* ── Material Symbols from Local Assets ── */
+@font-face {
+  font-family: 'Material Symbols Rounded';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('/fonts/material-symbols-rounded.woff2') format('woff2');
+}
+
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+/* ── MD3 baseline overrides ── */
+:root {
+  /* MD3 Typography */
+  --md-ref-typeface-brand: 'Google Sans', system-ui, sans-serif;
+  --md-ref-typeface-plain: 'Google Sans', system-ui, sans-serif;
+
+  /* AST custom */
+  --ast-bar-inactive: var(--md-sys-color-surface-variant);
+  --ast-bar-active: var(--md-sys-color-primary);
+  --ast-axis-text: var(--md-sys-color-on-surface-variant);
+
+  /* MD3 Ripple tokens */
+  --md-ripple-hover-color: var(--md-sys-color-on-surface);
+  --md-ripple-pressed-color: var(--md-sys-color-on-surface);
+}
+
+/* Fallback for surface-container if material-color-utilities is older */
+:root {
+  --md-sys-color-surface-container: var(--md-sys-color-surface-variant);
+  --md-sys-color-surface-container-low: var(--md-sys-color-surface);
+  --md-sys-color-surface-container-high: color-mix(in srgb, var(--md-sys-color-surface) 90%, var(--md-sys-color-on-surface));
+  --md-sys-color-surface-container-highest: color-mix(in srgb, var(--md-sys-color-surface) 80%, var(--md-sys-color-on-surface));
+}
+
+/* ── Global ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  outline: none !important;
+}
+body, h1, h2, h3, h4, p, button {
+  margin: 0;
+  padding: 0;
+}
+dialog, md-dialog {
+  margin: auto;
+}
+.recharts-bar-rectangle path,
+.recharts-bar-rectangle rect {
+  transition: fill 0.3s ease;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--md-ref-typeface-plain);
+  -webkit-user-select: none;
+  user-select: none;
+  background: var(--md-sys-color-background, #fafdfc);
+  color: var(--md-sys-color-on-background, #191c1c);
+  overflow: hidden;
+}
+
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-outline-variant);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--md-sys-color-outline); }
+
+/* ── Nav rail button ── */
+.nav-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 0;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  transition: color 0.2s;
+  font-family: inherit;
+  overflow: hidden;
+}
+.nav-item.active {
+  color: var(--md-sys-color-on-secondary-container);
+}
+.nav-item .nav-indicator {
+  position: absolute;
+  top: 8px; left: 50%;
+  transform: translateX(-50%);
+  width: 56px; height: 32px;
+  border-radius: 99px;
+  background: transparent;
+  transition: background 0.2s, width 0.2s;
+  pointer-events: none;
+}
+.nav-item.active .nav-indicator {
+  background: var(--md-sys-color-secondary-container);
+  width: 56px;
+}
+
+/* ── App list row hover ── */
+.app-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: background 0.15s;
+  overflow: hidden;
+  font-family: inherit;
+}
+.app-row md-ripple {
+  --md-ripple-hover-color: var(--md-sys-color-on-surface);
+  --md-ripple-pressed-color: var(--md-sys-color-on-surface);
+}
+.app-row:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+.app-row.selected { background: var(--md-sys-color-secondary-container); }
+.app-row.selected md-ripple {
+  --md-ripple-hover-color: var(--md-sys-color-on-secondary-container);
+  --md-ripple-pressed-color: var(--md-sys-color-on-secondary-container);
+}
+
+/* ── Surface card ── */
+.ast-card {
+  border-radius: 24px;
+  overflow: hidden;
+  background: var(--md-sys-color-surface-container, var(--md-sys-color-surface-variant));
+}
+
+/* ── Segmented button group ── */
+.seg-group {
+  display: flex;
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.seg-btn {
+  position: relative;
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  transition: background 0.15s, color 0.15s;
+  overflow: hidden;
+  font-family: inherit;
+}
+.seg-btn.active {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+.seg-btn md-ripple {
+  --md-ripple-hover-color: var(--md-sys-color-on-surface);
+  --md-ripple-pressed-color: var(--md-sys-color-on-surface);
+}
+.seg-btn.active md-ripple {
+  --md-ripple-hover-color: var(--md-sys-color-on-secondary-container);
+  --md-ripple-pressed-color: var(--md-sys-color-on-secondary-container);
+}
+
+md-dialog {
+  --md-dialog-container-color: var(--md-sys-color-surface-container-high);
+  --md-dialog-headline-color: var(--md-sys-color-on-surface);
+  --md-dialog-supporting-text-color: var(--md-sys-color-on-surface-variant);
+}
+
+
+
