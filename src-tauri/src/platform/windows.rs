@@ -10,11 +10,33 @@ use crate::AppState;
 const PIPE_NAME: &str = r"\\.\pipe\Flunty.ActiveScreenTime.SingleInstance";
 const APP_ID: &str = "Flunty.ActiveScreenTime";
 
-pub fn set_app_user_model_id(id: &str) {
+pub fn set_app_user_model_id() {
+    use winreg::RegKey;
+    use winreg::enums::*;
     use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
     use windows::core::PCWSTR;
-    let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+
+    let wide: Vec<u16> = APP_ID.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe { let _ = SetCurrentProcessExplicitAppUserModelID(PCWSTR(wide.as_ptr())); }
+
+    let icon_dir = dirs_next::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("Flunty")
+        .join("ActiveScreenTime");
+    let _ = std::fs::create_dir_all(&icon_dir);
+    let icon_path = icon_dir.join("app_icon.png");
+
+    const ICON_BYTES: &[u8] = include_bytes!("../../icons/icon.png");
+    if !icon_path.exists() {
+        let _ = std::fs::write(&icon_path, ICON_BYTES);
+    }
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok((key, _)) = hkcu.create_subkey(format!(r"Software\Classes\AppUserModelId\{}", APP_ID)) {
+        let _ = key.set_value("DisplayName", &"Active Screen Time");
+        let _ = key.set_value("IconUri", &icon_path.to_string_lossy().to_string());
+        let _ = key.set_value("IconBackgroundColor", &"0");
+    }
 }
 
 /// Try to signal an existing running instance via the named pipe.
@@ -65,7 +87,6 @@ pub fn signal_existing_instance() -> bool {
 /// Start the named pipe IPC server in a background thread.
 /// When "SHOW_DASHBOARD" is received, sets a flag that the UI polls.
 pub fn start_ipc_server(_state: Arc<AppState>) {
-    use std::sync::atomic::Ordering;
     use windows::Win32::System::Pipes::*;
     use windows::Win32::Foundation::*;
     use windows::Win32::Storage::FileSystem::*;
@@ -108,9 +129,7 @@ pub fn start_ipc_server(_state: Arc<AppState>) {
                     ).is_ok() {
                         let msg = std::str::from_utf8(&buf[..bytes_read as usize]).unwrap_or("");
                         if msg == "SHOW_DASHBOARD" {
-                            // Signal the UI to show the window
-                            // We use a global flag the eframe update loop polls
-                            SHOW_DASHBOARD_FLAG.store(true, Ordering::Relaxed);
+                            crate::show_dashboard();
                         }
                     }
                 }
@@ -120,32 +139,69 @@ pub fn start_ipc_server(_state: Arc<AppState>) {
     });
 }
 
-// Global flag for IPC: the eframe update loop polls this
-pub static SHOW_DASHBOARD_FLAG: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+// Active toast notifications kept alive for interactive click events
+static ACTIVE_TOASTS: std::sync::Mutex<Vec<windows::UI::Notifications::ToastNotification>> =
+    std::sync::Mutex::new(Vec::new());
 
 /// Show a native Windows toast notification
 pub fn show_notification(title: &str, body: &str) {
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+    use windows::Foundation::TypedEventHandler;
+
+    set_app_user_model_id();
+
+    let icon_dir = dirs_next::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("Flunty")
+        .join("ActiveScreenTime");
+    let icon_path = icon_dir.join("app_icon.png");
+
+    let icon_tag = if icon_path.exists() {
+        format!(
+            r#"<image placement="appLogoOverride" hint-crop="circle" src="file:///{}" />"#,
+            icon_path.to_string_lossy().replace('\\', "/")
+        )
+    } else {
+        String::new()
+    };
 
     let xml_str = format!(
-        r#"<toast>
+        r#"<toast activationType="foreground" launch="show_dashboard">
             <visual>
-                <binding template="ToastText02">
-                    <text id="1">{}</text>
-                    <text id="2">{}</text>
+                <binding template="ToastGeneric">
+                    <text>{}</text>
+                    <text>{}</text>
+                    {}
+                    <text placement="attribution">Active Screen Time</text>
                 </binding>
             </visual>
         </toast>"#,
         title.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
         body.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+        icon_tag,
     );
 
     let result: windows::core::Result<()> = (|| {
         let doc = XmlDocument::new()?;
         doc.LoadXml(&windows::core::HSTRING::from(xml_str.as_str()))?;
         let toast = ToastNotification::CreateToastNotification(&doc)?;
+
+        let handler = TypedEventHandler::<ToastNotification, windows::core::IInspectable>::new(
+            move |_sender, _args| {
+                crate::show_dashboard();
+                Ok(())
+            }
+        );
+        let _ = toast.Activated(&handler);
+
+        if let Ok(mut list) = ACTIVE_TOASTS.lock() {
+            if list.len() >= 10 {
+                list.remove(0);
+            }
+            list.push(toast.clone());
+        }
+
         let notifier = ToastNotificationManager::CreateToastNotifierWithId(
             &windows::core::HSTRING::from(APP_ID),
         )?;

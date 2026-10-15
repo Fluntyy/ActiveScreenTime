@@ -275,11 +275,30 @@ function applyMaterialTheme(hexColor: string, dark: boolean) {
   document.documentElement.style.setProperty("--ast-axis-text", hexFromArgb(scheme.onSurfaceVariant));
 }
 
+interface MonthlyReportData {
+  month_name: string;
+  hours: number;
+  mins: number;
+  total_secs: number;
+  active_days: number;
+  avg_hours: number;
+  avg_mins: number;
+  most_active_day: string;
+  top_apps?: {
+    name: string;
+    secs: number;
+    time_str: string;
+    pct: number;
+  }[];
+}
+
 // ── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
   const win = getCurrentWindow();
   const dialogRef = useRef<any>(null);
+  const monthlyDialogRef = useRef<any>(null);
+  const [monthlyReport, setMonthlyReport] = useState<MonthlyReportData | null>(null);
 
   const [activeTab, setActiveTab] = useState(0);
   const [todayUsage, setTodayUsage] = useState(0);
@@ -389,6 +408,13 @@ export default function App() {
     if (sets["first_run_completed"] !== "1") {
       setShowOobe(true);
     }
+    if (sets["pending_monthly_report"]) {
+      try {
+        const data = JSON.parse(sets["pending_monthly_report"]);
+        setMonthlyReport(data);
+        setTimeout(() => monthlyDialogRef.current?.show(), 350);
+      } catch {}
+    }
     setExcludeRegex(sets["exclude_regex"] ?? "");
     const saved = (sets["theme"] as "System" | "Light" | "Dark") ?? "System";
     setThemeMode(saved);
@@ -452,11 +478,17 @@ export default function App() {
       isVisible.current = !!e.payload;
       if (e.payload) {
         loadUsage();
+        loadSettings();
       }
     });
 
     const unlistenPause = listen("pause-state-changed", (e: any) => {
       setPausedUntil(e.payload);
+    });
+
+    const unlistenMonthly = listen("monthly-report", (e: any) => {
+      setMonthlyReport(e.payload);
+      setTimeout(() => monthlyDialogRef.current?.show(), 100);
     });
 
     const noCtx = (e: MouseEvent) => e.preventDefault();
@@ -468,6 +500,7 @@ export default function App() {
       unlistenP.then((f) => f());
       unlistenVis.then((f) => f());
       unlistenPause.then((f) => f());
+      unlistenMonthly.then((f) => f());
       document.removeEventListener("contextmenu", noCtx);
     };
   }, [selectedDate, selectedApp, loadSettings, loadUsage]);
@@ -495,6 +528,12 @@ export default function App() {
   async function resetData() {
     await invoke("reset_data");
     loadUsage();
+  }
+
+  async function dismissMonthlyReport() {
+    monthlyDialogRef.current?.close();
+    setMonthlyReport(null);
+    await updateSetting("pending_monthly_report", "");
   }
 
   const todayStr = new Date().toISOString().split("T")[0];
@@ -551,9 +590,9 @@ export default function App() {
         <div
           data-tauri-drag-region
           className="md-typescale-label-medium"
-          style={{ display: "flex", alignItems: "center", gap: 8, pointerEvents: "none", color: "var(--md-sys-color-on-surface-variant)", margin: 0, userSelect: "none", WebkitUserSelect: "none" }}
+          style={{ display: "flex", alignItems: "center", gap: 6, pointerEvents: "none", color: "var(--md-sys-color-on-surface-variant)", margin: 0, userSelect: "none", WebkitUserSelect: "none" }}
         >
-          <img src="/logo.ico" data-tauri-drag-region style={{ width: 14, height: 14, opacity: 0.7, pointerEvents: "none" }} alt="" />
+          <img src="/logo.ico" data-tauri-drag-region style={{ width: 18, height: 18, opacity: 0.85, pointerEvents: "none" }} alt="" />
           <span data-tauri-drag-region style={{ pointerEvents: "none", userSelect: "none", WebkitUserSelect: "none" }}>{windowTitle}</span>
         </div>
         <div style={{ display: "flex", gap: 2 }} onContextMenu={(e) => e.stopPropagation()}>
@@ -667,6 +706,64 @@ export default function App() {
                     secs={displaySecs} 
                     style={{ fontSize: "64px", fontWeight: 700, letterSpacing: "-1px", color: "var(--md-sys-color-on-surface)", lineHeight: 1, margin: 0 }} 
                   />
+                  {settings["goal_enabled"] === "1" && (() => {
+                    const goalMins = parseInt(settings["goal_minutes"] || "240", 10) || 240;
+                    const goalSecs = goalMins * 60;
+                    const pct = goalSecs > 0 ? Math.round((displaySecs / goalSecs) * 100) : 0;
+                    const gh = Math.floor(goalMins / 60);
+                    const gm = goalMins % 60;
+                    const goalText = gh > 0 
+                      ? `${gh}h ${String(gm).padStart(2, "0")}m`
+                      : `${gm}m`;
+
+                    return (
+                      <div style={{ marginTop: 0, width: "100%", maxWidth: 320 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                          <span 
+                            style={{ 
+                              color: "var(--md-sys-color-on-surface-variant)", 
+                              fontWeight: 500,
+                              fontSize: 13,
+                              letterSpacing: "0.2px"
+                            }}
+                          >
+                            Daily Goal: {goalText}
+                          </span>
+                          <span 
+                            style={{ 
+                              color: "var(--md-sys-color-on-surface)", 
+                              fontWeight: 700,
+                              fontSize: 14,
+                              display: "inline-flex",
+                              alignItems: "baseline"
+                            }}
+                          >
+                            <NumberFlow value={pct} suffix="%" />
+                          </span>
+                        </div>
+                        <div 
+                          style={{ 
+                            width: "100%", 
+                            height: 6, 
+                            borderRadius: 9999, 
+                            background: "color-mix(in srgb, var(--md-sys-color-on-surface) 14%, transparent)",
+                            overflow: "hidden"
+                          }}
+                        >
+                          <motion.div 
+                            initial={false}
+                            animate={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                            style={{ 
+                              height: "100%", 
+                              borderRadius: 9999, 
+                              background: "var(--md-sys-color-primary)" 
+                            }} 
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {settings["hide_active_app"] !== "1" && (() => {
                     const isCurrentlyPaused = pausedUntil && new Date(pausedUntil).getTime() > Date.now();
                     let pausedLabel = "Paused";
@@ -1198,7 +1295,8 @@ export default function App() {
                     label="Regex pattern"
                     placeholder="e.g. (?i)^python|.*code\\.exe$"
                     value={excludeRegex}
-                    style={{ width: "100%" }}
+                    className="font-mono-code"
+                    style={{ width: "100%", fontFamily: "'JetBrains Mono', monospace", ['--md-outlined-text-field-input-text-font' as any]: "'JetBrains Mono', monospace" }}
                     onInput={(e: any) => setExcludeRegex(e.target.value)}
                     onBlur={() => updateSetting("exclude_regex", excludeRegex)}
                   />
@@ -1221,7 +1319,8 @@ export default function App() {
                     placeholder="if (ctx.exe_name.toLowerCase() === 'code.exe') return false;"
                     value={settings["js_rule"] || ""}
                     onInput={(e: any) => updateSetting("js_rule", e.target.value)}
-                    style={{ width: "100%", fontFamily: "Consolas, monospace" }}
+                    className="font-mono-code"
+                    style={{ width: "100%", fontFamily: "'JetBrains Mono', monospace", ['--md-outlined-text-field-input-text-font' as any]: "'JetBrains Mono', monospace" }}
                   />
                 </div>
               </SettingSection>
@@ -1407,6 +1506,23 @@ export default function App() {
                   checked={settings["monthly_notification"] === "1"}
                   onChange={(v) => updateSetting("monthly_notification", v ? "1" : "0")}
                 />
+                <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "0 20px" }} />
+                <SettingRow
+                  title="Preview Monthly Report"
+                  subtitle="View current month's detailed summary, daily average, and top applications."
+                >
+                  <ChipButton onClick={async () => {
+                    try {
+                      const rep = await invoke<MonthlyReportData>("get_monthly_report");
+                      setMonthlyReport(rep);
+                      setTimeout(() => monthlyDialogRef.current?.show(), 50);
+                    } catch (e) {
+                      console.error("Failed to load monthly report preview:", e);
+                    }
+                  }}>
+                    View Report
+                  </ChipButton>
+                </SettingRow>
               </SettingSection>
             </div>
           )}
@@ -1428,6 +1544,133 @@ export default function App() {
             dialogRef.current?.close();
             resetData();
           }}>Delete</md-text-button>
+        </div>
+      </md-dialog>
+
+      <md-dialog ref={monthlyDialogRef} type="alert" style={{ maxWidth: 500, width: "100%" }}>
+        <div slot="headline" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="material-symbols-rounded" style={{ color: "var(--md-sys-color-primary)", fontSize: 26 }}>calendar_month</span>
+          <span style={{ fontSize: 20, fontWeight: 700, color: "var(--md-sys-color-on-surface)" }}>
+            {monthlyReport?.month_name ? `${monthlyReport.month_name} Summary` : "Monthly Screen Time Report"}
+          </span>
+        </div>
+        <div slot="content" style={{ maxHeight: "65vh", overflowY: "auto", paddingRight: 4 }}>
+          {monthlyReport && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 4 }}>
+              {/* Hero Total Card */}
+              <div
+                style={{
+                  background: "var(--md-sys-color-surface-container-high)",
+                  borderRadius: 18,
+                  padding: "16px 20px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--md-sys-color-on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Total Screen Time
+                  </div>
+                  <div style={{ fontSize: 26, fontWeight: 700, color: "var(--md-sys-color-primary)", marginTop: 2 }}>
+                    {monthlyReport.hours}h {monthlyReport.mins}m
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--md-sys-color-on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Active Days
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "var(--md-sys-color-on-surface)", marginTop: 2 }}>
+                    {monthlyReport.active_days} {monthlyReport.active_days === 1 ? "day" : "days"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Stats Row */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div
+                  style={{
+                    background: "var(--md-sys-color-surface-container)",
+                    borderRadius: 14,
+                    padding: "12px 14px",
+                  }}
+                >
+                  <div style={{ fontSize: 11, color: "var(--md-sys-color-on-surface-variant)", fontWeight: 500 }}>Daily Average</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--md-sys-color-on-surface)", marginTop: 2 }}>
+                    {monthlyReport.avg_hours}h {monthlyReport.avg_mins}m <span style={{ fontSize: 11, fontWeight: 400, color: "var(--md-sys-color-on-surface-variant)" }}>/ day</span>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    background: "var(--md-sys-color-surface-container)",
+                    borderRadius: 14,
+                    padding: "12px 14px",
+                  }}
+                >
+                  <div style={{ fontSize: 11, color: "var(--md-sys-color-on-surface-variant)", fontWeight: 500 }}>Most Active Day</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--md-sys-color-on-surface)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={monthlyReport.most_active_day}>
+                    {monthlyReport.most_active_day}
+                  </div>
+                </div>
+              </div>
+
+              {/* Top Apps List */}
+              {monthlyReport.top_apps && monthlyReport.top_apps.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--md-sys-color-on-surface-variant)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Top Applications
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {monthlyReport.top_apps.map((app, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          background: "var(--md-sys-color-surface-container)",
+                          borderRadius: 12,
+                          padding: "10px 14px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--md-sys-color-on-surface)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "65%" }}>
+                            {idx + 1}. {app.name}
+                          </span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--md-sys-color-on-surface-variant)" }}>
+                            {app.time_str} {app.pct > 0 && `(${app.pct}%)`}
+                          </span>
+                        </div>
+                        {app.pct > 0 && (
+                          <div
+                            style={{
+                              width: "100%",
+                              height: 4,
+                              borderRadius: 99,
+                              background: "color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent)",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: `${Math.min(100, Math.max(2, app.pct))}%`,
+                                height: "100%",
+                                borderRadius: 99,
+                                background: "var(--md-sys-color-primary)",
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div slot="actions">
+          <md-text-button onClick={dismissMonthlyReport}>Got it</md-text-button>
         </div>
       </md-dialog>
     </>

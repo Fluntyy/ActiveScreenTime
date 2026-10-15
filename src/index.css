@@ -9,11 +9,18 @@
   font-weight: 100 900;
   font-style: normal;
 }
+
+/* ── JetBrains Mono from Local Assets ── */
 @font-face {
-  font-family: 'Google Sans';
-  src: url('/fonts/GoogleSans-Italic.ttf') format('truetype');
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono.ttf') format('truetype');
   font-weight: 100 900;
-  font-style: italic;
+  font-style: normal;
+}
+
+.font-mono-code {
+  font-family: 'JetBrains Mono', monospace !important;
+  --md-outlined-text-field-input-text-font: 'JetBrains Mono', monospace !important;
 }
 
 /* ── Material Symbols from Local Assets ── */

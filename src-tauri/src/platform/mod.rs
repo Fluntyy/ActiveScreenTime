@@ -3,6 +3,11 @@
 #[cfg(windows)]
 pub mod windows;
 
+pub fn init_platform() {
+    #[cfg(windows)]
+    windows::set_app_user_model_id();
+}
+
 /// Cross-platform notification
 pub fn notify(title: &str, body: &str) {
     #[cfg(windows)]

@@ -326,6 +326,72 @@ fn show_or_create_dashboard(app: &tauri::AppHandle) {
     }
 }
 
+pub static GLOBAL_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+pub fn show_dashboard() {
+    if let Some(app) = GLOBAL_APP_HANDLE.get() {
+        show_or_create_dashboard(app);
+    }
+}
+
+fn build_monthly_report_payload(db: &Database) -> serde_json::Value {
+    let now = chrono::Local::now();
+    let current_month = now.format("%Y-%m").to_string();
+    let month_name = now.format("%B %Y").to_string();
+    let today = now.format("%Y-%m-%d").to_string();
+    let start = format!("{}-01", current_month);
+
+    let total_secs = db.get_total_usage_for_range(&start, &today);
+    let top_apps_raw = db.get_top_apps_for_range(&start, &today, 5);
+    let history = db.get_history_for_range(&start, &today);
+
+    let active_days = history.iter().filter(|(_, s)| *s > 0).count() as i64;
+    let most_active = history.iter().max_by_key(|(_, s)| *s);
+    let most_active_day = most_active.map(|(d, s)| {
+        let h = s / 3600;
+        let m = (s % 3600) / 60;
+        let time_str = if h > 0 { format!("{}h {}m", h, m) } else { format!("{}m", m) };
+        format!("{} ({})", d, time_str)
+    }).unwrap_or_else(|| "N/A".to_string());
+
+    let hours = total_secs / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let avg_secs = if active_days > 0 { total_secs / active_days } else { total_secs / 30 };
+    let avg_hours = avg_secs / 3600;
+    let avg_mins = (avg_secs % 3600) / 60;
+
+    let top_apps: Vec<serde_json::Value> = top_apps_raw.into_iter().map(|(name, s)| {
+        let app_h = s / 3600;
+        let app_m = (s % 3600) / 60;
+        let time_str = if app_h > 0 { format!("{}h {}m", app_h, app_m) } else { format!("{}m", app_m) };
+        let pct = if total_secs > 0 { (s * 100) / total_secs } else { 0 };
+        serde_json::json!({
+            "name": name,
+            "secs": s,
+            "time_str": time_str,
+            "pct": pct
+        })
+    }).collect();
+
+    serde_json::json!({
+        "month_name": month_name,
+        "hours": hours,
+        "mins": mins,
+        "total_secs": total_secs,
+        "active_days": active_days,
+        "avg_hours": avg_hours,
+        "avg_mins": avg_mins,
+        "most_active_day": most_active_day,
+        "top_apps": top_apps
+    })
+}
+
+#[tauri::command]
+fn get_monthly_report(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
+    let db = state.db.lock().unwrap();
+    build_monthly_report_payload(&db)
+}
+
 fn main() {
     // Resolve DB path
     let local_app_data = dirs_next::data_local_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -366,9 +432,13 @@ fn main() {
             import_db,
             export_settings,
             import_settings,
-            show_system_menu
+            show_system_menu,
+            get_monthly_report
         ])
         .setup(move |app| {
+            GLOBAL_APP_HANDLE.set(app.handle().clone()).ok();
+            platform::init_platform();
+
             use std::thread;
             use crossbeam_channel::unbounded;
             
@@ -476,16 +546,22 @@ fn main() {
                                     );
                                 });
                             }
-                            features::FeatureAlert::MonthlyReport { total_secs } => {
-                                use tauri_plugin_dialog::{DialogExt, MessageDialogKind, MessageDialogButtons};
-                                let hours = total_secs / 3600;
-                                let msg = format!("Your total screen time for this month is {} hours. Avg: {} hours/day.", hours, hours / 30);
-                                let _ = handle.dialog()
-                                    .message(&msg)
-                                    .title("Monthly Screen Time Report")
-                                    .kind(MessageDialogKind::Info)
-                                    .buttons(MessageDialogButtons::Ok)
-                                    .show(|_| {});
+                            features::FeatureAlert::MonthlyReport { total_secs: _ } => {
+                                let payload = {
+                                    let db = state_for_features.db.lock().unwrap();
+                                    build_monthly_report_payload(&db)
+                                };
+
+                                let month_name = payload["month_name"].as_str().unwrap_or("this month");
+                                let hours = payload["hours"].as_i64().unwrap_or(0);
+                                let mins = payload["mins"].as_i64().unwrap_or(0);
+                                let toast_msg = format!("Your total screen time for {} is {}h {}m. Click to view detailed summary.", month_name, hours, mins);
+                                platform::notify("Monthly Screen Time Report", &toast_msg);
+
+                                let report_str = payload.to_string();
+                                state_for_features.db.lock().unwrap().set_setting("pending_monthly_report", &report_str).ok();
+
+                                let _ = handle.emit("monthly-report", payload);
                             }
                             _ => {}
                         }
