@@ -78,7 +78,24 @@
 *, *::before, *::after {
   box-sizing: border-box;
   outline: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
+
+input, textarea, [contenteditable="true"], md-outlined-text-field {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+::selection {
+  background: transparent;
+}
+
+input::selection, textarea::selection {
+  background: var(--md-sys-color-primary-container, #d0e4ff);
+  color: var(--md-sys-color-on-primary-container, #001d36);
+}
+
 body, h1, h2, h3, h4, p, button {
   margin: 0;
   padding: 0;
@@ -97,8 +114,8 @@ html, body, #root {
 
 body {
   font-family: var(--md-ref-typeface-plain);
-  -webkit-user-select: none;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
   background: var(--md-sys-color-background, #fafdfc);
   color: var(--md-sys-color-on-background, #191c1c);
   overflow: hidden;
@@ -218,6 +235,13 @@ md-dialog {
   --md-dialog-container-color: var(--md-sys-color-surface-container-high);
   --md-dialog-headline-color: var(--md-sys-color-on-surface);
   --md-dialog-supporting-text-color: var(--md-sys-color-on-surface-variant);
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+md-dialog * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 
