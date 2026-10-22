@@ -161,6 +161,13 @@ declare module "react" {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+function formatLocalDate(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function formatSecs(secs: number) {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
@@ -557,8 +564,10 @@ export default function App() {
   const [pausedUntil, setPausedUntil] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [chartEndDateStr, setChartEndDateStr] = useState<string>(
-    new Date().toISOString().split("T")[0],
+    formatLocalDate(),
   );
+  const [appVersion, setAppVersion] = useState("0.1.1");
+  const lastKnownDayRef = useRef<string>(formatLocalDate());
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const dateWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -611,7 +620,7 @@ export default function App() {
     const total = await invoke<number>("get_today_usage");
     setTodayUsage(total);
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = formatLocalDate();
     const fetchDate = selectedDate || todayStr;
     const apps = await invoke<[string, string, number][]>(
       "get_app_usage_by_date",
@@ -643,7 +652,7 @@ export default function App() {
         0,
       );
       d.setDate(d.getDate() - (6 - i));
-      const dateStr = d.toISOString().split("T")[0];
+      const dateStr = formatLocalDate(d);
       const name = d.toLocaleDateString("en-US", { weekday: "short" });
       return { dateStr, name, secs: 0 };
     });
@@ -678,6 +687,11 @@ export default function App() {
     try {
       sets["autostart"] = (await isEnabled()) ? "1" : "0";
     } catch {}
+    invoke<string>("get_app_version")
+      .then((v) => {
+        if (v) setAppVersion(v);
+      })
+      .catch(() => {});
     setSettings(sets);
     if (sets["first_run_completed"] !== "1") {
       setShowOobe(true);
@@ -738,6 +752,17 @@ export default function App() {
     loadUsage();
 
     const interval = setInterval(() => {
+      // Midnight day-rollover detection (00:00)
+      const nowDay = formatLocalDate();
+      if (nowDay !== lastKnownDayRef.current) {
+        const prevDay = lastKnownDayRef.current;
+        lastKnownDayRef.current = nowDay;
+        // If the chart was showing the current week, advance to the new day
+        setChartEndDateStr((prev) => (prev >= prevDay ? nowDay : prev));
+        // Reset selected date if it was pointing to yesterday so today is auto-focused
+        setSelectedDate((prev) => (prev === prevDay ? null : prev));
+      }
+
       if (isVisible.current) {
         loadUsage();
       }
@@ -815,7 +840,7 @@ export default function App() {
     await updateSetting("pending_monthly_report", "");
   }
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = formatLocalDate();
   const isCurrentWeek = chartEndDateStr >= todayStr;
 
   function goPrevWeek() {
@@ -829,7 +854,7 @@ export default function App() {
       0,
     );
     d.setDate(d.getDate() - 7);
-    setChartEndDateStr(d.toISOString().split("T")[0]);
+    setChartEndDateStr(formatLocalDate(d));
   }
 
   function goNextWeek() {
@@ -843,7 +868,7 @@ export default function App() {
       0,
     );
     d.setDate(d.getDate() + 7);
-    let newStr = d.toISOString().split("T")[0];
+    let newStr = formatLocalDate(d);
     if (newStr > todayStr) newStr = todayStr;
     setChartEndDateStr(newStr);
   }
@@ -1576,6 +1601,7 @@ export default function App() {
                           </AnimatePresence>
                           <ResponsiveContainer width="100%" height="100%">
                             <BarChart
+                              key={chartEndDateStr + (selectedApp || "")}
                               data={history}
                               margin={{ top: 4, right: 4, bottom: 0, left: 4 }}
                               style={{ cursor: "pointer" }}
@@ -1644,6 +1670,7 @@ export default function App() {
                               <Bar
                                 dataKey="secs"
                                 radius={[6, 6, 0, 0]}
+                                isAnimationActive={false}
                                 style={{ cursor: "pointer" }}
                                 onClick={(data: any) => {
                                   const dateStr =
@@ -1669,7 +1696,7 @@ export default function App() {
 
                                   return (
                                     <Cell
-                                      key={`c-${i}`}
+                                      key={entry.dateStr}
                                       fill={fill}
                                       style={{ transition: "fill 0.2s ease" }}
                                     />
@@ -2498,7 +2525,7 @@ export default function App() {
                                 margin: 0,
                               }}
                             >
-                              0.1.0
+                              {appVersion}
                             </p>
                           </div>
                           <div>
@@ -3129,7 +3156,7 @@ function SimpleDatePicker({
   for (let i = 0; i < firstDay; i++) days.push(null);
   for (let i = 1; i <= daysInMonth; i++) days.push(i);
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = formatLocalDate();
   const todayParts = todayStr.split("-");
   const todayY = Number(todayParts[0]);
   const todayM = Number(todayParts[1]) - 1;

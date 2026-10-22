@@ -37,6 +37,61 @@ fn get_idle_seconds() -> f64 {
 }
 
 
+struct UwpSearch {
+    host_pid: u32,
+    found_pid: u32,
+}
+
+unsafe extern "system" fn enum_uwp_child_proc(child_hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let search = &mut *(lparam.0 as *mut UwpSearch);
+    let mut child_pid = 0u32;
+    GetWindowThreadProcessId(child_hwnd, Some(&mut child_pid));
+
+    if child_pid != 0 && child_pid != search.host_pid {
+        let mut class_buf = [0u16; 256];
+        let len = GetClassNameW(child_hwnd, &mut class_buf);
+        let class_name = String::from_utf16_lossy(&class_buf[..len as usize]);
+
+        search.found_pid = child_pid;
+        if class_name == "Windows.UI.Core.CoreWindow" {
+            return FALSE; // Target CoreWindow found, stop enumerating
+        }
+    }
+    TRUE
+}
+
+fn resolve_uwp_process(hwnd: HWND, host_pid: u32) -> Option<(u32, String, String)> {
+    unsafe {
+        let mut search = UwpSearch {
+            host_pid,
+            found_pid: 0,
+        };
+        let _ = EnumChildWindows(hwnd, Some(enum_uwp_child_proc), LPARAM(&mut search as *mut _ as isize));
+        if search.found_pid != 0 {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, search.found_pid);
+            if let Ok(h) = process {
+                let mut buf = vec![0u16; 1024];
+                let mut size = buf.len() as u32;
+                let exe = if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut size).is_ok() {
+                    String::from_utf16_lossy(&buf[..size as usize])
+                } else {
+                    String::new()
+                };
+                let name = std::path::Path::new(&exe)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let _ = CloseHandle(h);
+                if !name.is_empty() {
+                    return Some((search.found_pid, exe, name));
+                }
+            }
+        }
+        None
+    }
+}
+
 /// Get the foreground window's process name, exe path, title, PID
 fn get_foreground_info(own_pid: u32) -> Option<(String, String, String, u32)> {
     unsafe {
@@ -60,7 +115,7 @@ fn get_foreground_info(own_pid: u32) -> Option<(String, String, String, u32)> {
         };
 
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        let (exe_path, raw_name) = if let Ok(h) = process {
+        let (mut exe_path, mut raw_name) = if let Ok(h) = process {
             let mut buf = vec![0u16; 1024];
             let mut size = buf.len() as u32;
             let exe = if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut size).is_ok() {
@@ -79,8 +134,23 @@ fn get_foreground_info(own_pid: u32) -> Option<(String, String, String, u32)> {
             (String::new(), String::new())
         };
 
+        // If the process is ApplicationFrameHost, resolve the underlying hosted UWP app
+        if raw_name.to_lowercase() == "applicationframehost.exe" {
+            if let Some((real_pid, real_exe, real_name)) = resolve_uwp_process(hwnd, pid) {
+                pid = real_pid;
+                exe_path = real_exe;
+                raw_name = real_name;
+            }
+        }
+
         // Resolve friendly name via file description
-        let friendly_name = get_friendly_name(&exe_path, &raw_name);
+        let mut friendly_name = get_friendly_name(&exe_path, &raw_name);
+
+        // Fallback: If friendly name is still "Application Frame Host" (or empty) and title is available,
+        // use the window title (e.g. "Settings", "WSA Settings", etc.)
+        if (friendly_name.is_empty() || friendly_name.eq_ignore_ascii_case("Application Frame Host")) && !title.trim().is_empty() {
+            friendly_name = clean_app_name(&title);
+        }
 
         Some((friendly_name, exe_path, title, pid))
     }
@@ -447,7 +517,12 @@ pub fn run_tracker(
                     should_ignore = true;
                 }
 
-                if disable_windows_apps && exe_path.to_lowercase().contains("applicationframehost.exe") {
+                if disable_windows_apps && (
+                    exe_path.to_lowercase().contains("applicationframehost.exe")
+                    || exe_path.to_lowercase().contains("windowsapps")
+                    || exe_path.to_lowercase().contains("immersivecontrolpanel")
+                    || exe_path.to_lowercase().contains("systemapps")
+                ) {
                     should_ignore = true;
                 }
 

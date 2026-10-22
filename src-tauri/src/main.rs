@@ -392,6 +392,11 @@ fn get_monthly_report(state: tauri::State<Arc<AppState>>) -> serde_json::Value {
     build_monthly_report_payload(&db)
 }
 
+#[tauri::command]
+fn get_app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 fn main() {
     // Resolve DB path
     let local_app_data = dirs_next::data_local_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -433,7 +438,8 @@ fn main() {
             export_settings,
             import_settings,
             show_system_menu,
-            get_monthly_report
+            get_monthly_report,
+            get_app_version
         ])
         .setup(move |app| {
             GLOBAL_APP_HANDLE.set(app.handle().clone()).ok();
@@ -470,6 +476,7 @@ fn main() {
             let app_state_for_tray = Arc::clone(&app_state);
             let _tray = tauri::tray::TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Active Screen Time")
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
