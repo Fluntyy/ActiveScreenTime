@@ -5,6 +5,7 @@ mod db;
 mod tracker;
 mod features;
 mod platform;
+mod updater;
 
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
 use tauri::{Manager, Emitter};
@@ -19,6 +20,7 @@ pub struct AppState {
     pub db: Mutex<Database>,
     pub is_paused: AtomicBool,
     pub paused_until: Mutex<Option<chrono::DateTime<chrono::Local>>>,
+    pub pending_update: Mutex<Option<updater::UpdateInfo>>,
 }
 
 #[tauri::command]
@@ -397,6 +399,46 @@ fn get_app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+#[tauri::command]
+fn get_pending_update(state: tauri::State<Arc<AppState>>) -> Option<updater::UpdateInfo> {
+    state.pending_update.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn check_for_updates(state: tauri::State<Arc<AppState>>, app: tauri::AppHandle) -> Result<Option<updater::UpdateInfo>, String> {
+    let current_ver = app.package_info().version.to_string();
+    let res = updater::fetch_latest_release(&current_ver)?;
+    if let Some(ref info) = res {
+        if let Ok(mut lock) = state.pending_update.lock() {
+            *lock = Some(info.clone());
+        }
+        let _ = app.emit("update-available", info);
+    }
+    Ok(res)
+}
+
+#[tauri::command]
+fn install_update(app: tauri::AppHandle, asset_url: String, asset_name: String) {
+    std::thread::spawn(move || {
+        if let Err(e) = updater::download_and_install_update(&app, &asset_url, &asset_name) {
+            let _ = app.emit("update-error", e);
+        }
+    });
+}
+
+#[tauri::command]
+fn dismiss_update(state: tauri::State<Arc<AppState>>) {
+    if let Ok(mut lock) = state.pending_update.lock() {
+        *lock = None;
+    }
+}
+
+#[tauri::command]
+fn open_external_url(app: tauri::AppHandle, url: String) {
+    use tauri_plugin_opener::OpenerExt;
+    let _ = app.opener().open_url(&url, None::<&str>);
+}
+
 fn main() {
     // Resolve DB path
     let local_app_data = dirs_next::data_local_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -410,6 +452,7 @@ fn main() {
         db: Mutex::new(db),
         is_paused: AtomicBool::new(false),
         paused_until: Mutex::new(None),
+        pending_update: Mutex::new(None),
     });
 
     tauri::Builder::default()
@@ -439,7 +482,12 @@ fn main() {
             import_settings,
             show_system_menu,
             get_monthly_report,
-            get_app_version
+            get_app_version,
+            get_pending_update,
+            check_for_updates,
+            install_update,
+            dismiss_update,
+            open_external_url
         ])
         .setup(move |app| {
             GLOBAL_APP_HANDLE.set(app.handle().clone()).ok();
@@ -608,7 +656,48 @@ fn main() {
                 }
             });
 
+            // Auto-updater startup check (privacy-friendly: only if auto_check_updates == "1")
+            let state_for_updater = Arc::clone(&app_state);
+            let handle_for_updater = app.handle().clone();
             let is_autostart = std::env::args().any(|arg| arg == "--autostart" || arg == "--hidden" || arg == "--minimized");
+            let is_autostart_flag = is_autostart;
+
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+
+                let auto_check = state_for_updater
+                    .db
+                    .lock()
+                    .unwrap()
+                    .get_setting_or("auto_check_updates", "1") == "1";
+                if !auto_check {
+                    return;
+                }
+
+                let current_ver = handle_for_updater.package_info().version.to_string();
+                match updater::fetch_latest_release(&current_ver) {
+                    Ok(Some(info)) => {
+                        if let Ok(mut lock) = state_for_updater.pending_update.lock() {
+                            *lock = Some(info.clone());
+                        }
+
+                        // If the app is configured to run on startup, open the dashboard itself on startup if there's an update!
+                        if is_autostart_flag {
+                            let h = handle_for_updater.clone();
+                            let _ = handle_for_updater.run_on_main_thread(move || {
+                                show_or_create_dashboard(&h);
+                            });
+                        }
+
+                        let _ = handle_for_updater.emit("update-available", info);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!("[AutoUpdater] Startup check failed: {}", e);
+                    }
+                }
+            });
+
             if is_autostart {
                 let current_gen = HIDE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
                 let handle = app.handle().clone();

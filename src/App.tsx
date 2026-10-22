@@ -87,7 +87,10 @@ declare global {
         HTMLElement
       >;
       "md-text-button": React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & { onClick?: (e: Event) => void },
+        React.HTMLAttributes<HTMLElement> & {
+          onClick?: (e: Event) => void;
+          disabled?: boolean;
+        },
         HTMLElement
       >;
     }
@@ -153,7 +156,10 @@ declare module "react" {
         HTMLElement
       >;
       "md-text-button": React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & { onClick?: (e: Event) => void },
+        React.HTMLAttributes<HTMLElement> & {
+          onClick?: (e: Event) => void;
+          disabled?: boolean;
+        },
         HTMLElement
       >;
     }
@@ -543,15 +549,39 @@ interface MonthlyReportData {
   }[];
 }
 
+interface UpdateInfo {
+  current_version: string;
+  latest_version: string;
+  release_name: string;
+  changelog: string;
+  release_url: string;
+  asset_name: string | null;
+  asset_url: string | null;
+  asset_size: number | null;
+}
+
+interface DownloadProgress {
+  percent: number;
+  downloaded: number;
+  total: number;
+}
+
 // ── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
   const win = getCurrentWindow();
   const dialogRef = useRef<any>(null);
   const monthlyDialogRef = useRef<any>(null);
+  const updateDialogRef = useRef<any>(null);
   const [monthlyReport, setMonthlyReport] = useState<MonthlyReportData | null>(
     null,
   );
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState(0);
   const [todayUsage, setTodayUsage] = useState(0);
@@ -692,6 +722,13 @@ export default function App() {
         if (v) setAppVersion(v);
       })
       .catch(() => {});
+    try {
+      const pending = await invoke<UpdateInfo | null>("get_pending_update");
+      if (pending) {
+        setUpdateInfo(pending);
+        setTimeout(() => updateDialogRef.current?.show(), 350);
+      }
+    } catch {}
     setSettings(sets);
     if (sets["first_run_completed"] !== "1") {
       setShowOobe(true);
@@ -794,6 +831,20 @@ export default function App() {
       setTimeout(() => monthlyDialogRef.current?.show(), 100);
     });
 
+    const unlistenUpdate = listen<UpdateInfo>("update-available", (e) => {
+      setUpdateInfo(e.payload);
+      setTimeout(() => updateDialogRef.current?.show(), 150);
+    });
+
+    const unlistenProgress = listen<DownloadProgress>("update-download-progress", (e) => {
+      setDownloadProgress(e.payload);
+    });
+
+    const unlistenErr = listen<string>("update-error", (e) => {
+      setUpdateDownloading(false);
+      setUpdateError(e.payload);
+    });
+
     const noCtx = (e: MouseEvent) => e.preventDefault();
     document.addEventListener("contextmenu", noCtx);
 
@@ -804,6 +855,9 @@ export default function App() {
       unlistenVis.then((f) => f());
       unlistenPause.then((f) => f());
       unlistenMonthly.then((f) => f());
+      unlistenUpdate.then((f) => f());
+      unlistenProgress.then((f) => f());
+      unlistenErr.then((f) => f());
       document.removeEventListener("contextmenu", noCtx);
     };
   }, [selectedDate, selectedApp, loadSettings, loadUsage]);
@@ -839,6 +893,58 @@ export default function App() {
     setMonthlyReport(null);
     await updateSetting("pending_monthly_report", "");
   }
+
+  const handleManualCheckUpdates = async () => {
+    setIsCheckingUpdate(true);
+    setUpdateCheckStatus(null);
+    try {
+      const res = await invoke<UpdateInfo | null>("check_for_updates");
+      if (res) {
+        setUpdateInfo(res);
+        setTimeout(() => updateDialogRef.current?.show(), 100);
+      } else {
+        setUpdateCheckStatus(`You're up to date! v${appVersion} is the latest version.`);
+        setTimeout(() => setUpdateCheckStatus(null), 5000);
+      }
+    } catch (e: any) {
+      setUpdateCheckStatus(`Check failed: ${e?.toString() || "Network error"}`);
+      setTimeout(() => setUpdateCheckStatus(null), 5000);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const handleStartUpdate = async () => {
+    if (!updateInfo?.asset_url || !updateInfo?.asset_name) {
+      if (updateInfo?.release_url) {
+        await invoke("open_external_url", { url: updateInfo.release_url }).catch(() => {
+          window.open(updateInfo.release_url, "_blank");
+        });
+      }
+      return;
+    }
+    setUpdateDownloading(true);
+    setUpdateError(null);
+    setDownloadProgress({ percent: 0, downloaded: 0, total: updateInfo.asset_size || 0 });
+    try {
+      await invoke("install_update", {
+        assetUrl: updateInfo.asset_url,
+        assetName: updateInfo.asset_name,
+      });
+    } catch (e: any) {
+      setUpdateDownloading(false);
+      setUpdateError(e?.toString() || "Failed to start installer.");
+    }
+  };
+
+  const handleDismissUpdate = async () => {
+    updateDialogRef.current?.close();
+    setUpdateInfo(null);
+    setUpdateDownloading(false);
+    setDownloadProgress(null);
+    setUpdateError(null);
+    await invoke("dismiss_update").catch(() => {});
+  };
 
   const todayStr = formatLocalDate();
   const isCurrentWeek = chartEndDateStr >= todayStr;
@@ -1995,7 +2101,31 @@ export default function App() {
                           onChange={(v) =>
                             updateSetting("always_on_top", v ? "1" : "0")
                           }
+                          divider
                         />
+                        <MdSwitchRow
+                          title="Automatic Updates"
+                          subtitle="Automatically check GitHub for new versions on startup. Can be disabled for 100% offline privacy."
+                          checked={settings["auto_check_updates"] !== "0"}
+                          onChange={(v) =>
+                            updateSetting("auto_check_updates", v ? "1" : "0")
+                          }
+                          divider
+                        />
+                        <SettingRow
+                          title="Check for Updates"
+                          subtitle={
+                            updateCheckStatus ||
+                            `Current version: v${appVersion}. Releases from GitHub.`
+                          }
+                        >
+                          <ChipButton
+                            disabled={isCheckingUpdate}
+                            onClick={handleManualCheckUpdates}
+                          >
+                            {isCheckingUpdate ? "Checking..." : "Check Now"}
+                          </ChipButton>
+                        </SettingRow>
                       </SettingSection>
 
                       {/* Tracking */}
@@ -3055,6 +3185,273 @@ export default function App() {
           <md-text-button onClick={dismissMonthlyReport}>Got it</md-text-button>
         </div>
       </md-dialog>
+
+      <md-dialog
+        ref={updateDialogRef}
+        type="alert"
+        style={{
+          maxWidth: 500,
+          width: "100%",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+        }}
+      >
+        <div
+          slot="headline"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            userSelect: "none",
+            WebkitUserSelect: "none",
+          }}
+        >
+          <span
+            className="material-symbols-rounded"
+            style={{ color: "var(--md-sys-color-primary)", fontSize: 26 }}
+          >
+            system_update
+          </span>
+          <span
+            style={{
+              fontSize: 20,
+              fontWeight: 700,
+              color: "var(--md-sys-color-on-surface)",
+            }}
+          >
+            Update Available!
+          </span>
+        </div>
+        <div
+          slot="content"
+          style={{
+            maxHeight: "65vh",
+            overflowY: "auto",
+            paddingRight: 4,
+            userSelect: "none",
+            WebkitUserSelect: "none",
+          }}
+        >
+          {updateInfo && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Version Comparison Card */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "var(--md-sys-color-surface-container)",
+                  borderRadius: 14,
+                  padding: "12px 16px",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "var(--md-sys-color-on-surface-variant)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                    }}
+                  >
+                    Current
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 700,
+                      color: "var(--md-sys-color-on-surface)",
+                      marginTop: 2,
+                    }}
+                  >
+                    v{updateInfo.current_version}
+                  </div>
+                </div>
+                <span
+                  className="material-symbols-rounded"
+                  style={{ color: "var(--md-sys-color-primary)", fontSize: 22 }}
+                >
+                  arrow_forward
+                </span>
+                <div style={{ textAlign: "right" }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "var(--md-sys-color-primary)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                    }}
+                  >
+                    New Version
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 700,
+                      color: "var(--md-sys-color-primary)",
+                      marginTop: 2,
+                    }}
+                  >
+                    {updateInfo.latest_version.startsWith("v")
+                      ? updateInfo.latest_version
+                      : `v${updateInfo.latest_version}`}
+                  </div>
+                </div>
+              </div>
+
+              {/* Changelog */}
+              <div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--md-sys-color-on-surface-variant)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                    marginBottom: 6,
+                  }}
+                >
+                  {updateInfo.release_name || "Changelog"}
+                </div>
+                <div
+                  style={{
+                    background: "var(--md-sys-color-surface-container)",
+                    borderRadius: 12,
+                    padding: "12px 14px",
+                    maxHeight: "26vh",
+                    overflowY: "auto",
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    color: "var(--md-sys-color-on-surface)",
+                    whiteSpace: "pre-wrap",
+                    border: "1px solid var(--md-sys-color-outline-variant)",
+                  }}
+                >
+                  {updateInfo.changelog || "No changelog provided."}
+                </div>
+              </div>
+
+              {/* Download Progress */}
+              {updateDownloading && (
+                <div
+                  style={{
+                    background: "var(--md-sys-color-surface-container)",
+                    borderRadius: 12,
+                    padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "var(--md-sys-color-on-surface)",
+                    }}
+                  >
+                    <span>
+                      {downloadProgress?.percent && downloadProgress.percent >= 100
+                        ? "Launching installer..."
+                        : "Downloading update..."}
+                    </span>
+                    <span>
+                      {downloadProgress?.percent
+                        ? `${downloadProgress.percent.toFixed(0)}%`
+                        : "0%"}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      width: "100%",
+                      height: 6,
+                      borderRadius: 99,
+                      background:
+                        "color-mix(in srgb, var(--md-sys-color-on-surface) 10%, transparent)",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.max(3, downloadProgress?.percent || 0),
+                        )}%`,
+                        height: "100%",
+                        borderRadius: 99,
+                        background: "var(--md-sys-color-primary)",
+                        transition: "width 0.2s ease",
+                      }}
+                    />
+                  </div>
+                  {downloadProgress?.total && downloadProgress.total > 0 ? (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "var(--md-sys-color-on-surface-variant)",
+                        textAlign: "right",
+                      }}
+                    >
+                      {(downloadProgress.downloaded / 1048576).toFixed(1)} MB /{" "}
+                      {(downloadProgress.total / 1048576).toFixed(1)} MB
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {/* Error Alert */}
+              {updateError && (
+                <div
+                  style={{
+                    background: "var(--md-sys-color-error-container)",
+                    color: "var(--md-sys-color-on-error-container)",
+                    borderRadius: 12,
+                    padding: "10px 14px",
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {updateError}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div slot="actions">
+          <md-text-button
+            disabled={updateDownloading}
+            onClick={handleDismissUpdate}
+          >
+            Later
+          </md-text-button>
+          {updateInfo?.release_url && (
+            <md-text-button
+              disabled={updateDownloading}
+              onClick={() => {
+                invoke("open_external_url", { url: updateInfo.release_url }).catch(() => {
+                  window.open(updateInfo.release_url, "_blank");
+                });
+              }}
+            >
+              View on GitHub
+            </md-text-button>
+          )}
+          <md-text-button
+            disabled={updateDownloading}
+            onClick={handleStartUpdate}
+          >
+            {updateDownloading
+              ? "Installing..."
+              : updateInfo?.asset_url
+                ? "Update Now"
+                : "Download"}
+          </md-text-button>
+        </div>
+      </md-dialog>
     </>
   );
 }
@@ -3106,20 +3503,24 @@ function TitleBarButton({
 function ChipButton({
   onClick,
   children,
+  disabled,
 }: {
   onClick: () => void;
   children: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <button
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       style={{
         position: "relative",
         overflow: "hidden",
         padding: "6px 16px",
         borderRadius: 99,
         border: "none",
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.6 : 1,
         background: "var(--md-sys-color-secondary-container)",
         color: "var(--md-sys-color-on-secondary-container)",
         fontSize: 13,

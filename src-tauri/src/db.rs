@@ -64,6 +64,7 @@ impl Database {
             INSERT OR IGNORE INTO Settings VALUES ('ignore_shellexperiencehost', '1');
             INSERT OR IGNORE INTO Settings VALUES ('disable_windows_apps', '0');
             INSERT OR IGNORE INTO Settings VALUES ('ignore_system_ui', '1');
+            INSERT OR IGNORE INTO Settings VALUES ('auto_check_updates', '1');
         ")?;
         Ok(())
     }

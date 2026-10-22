@@ -248,6 +248,11 @@ export default function OobeWizard({ initialSettings, onComplete }: OobeWizardPr
   // Recommended system settings
   const [autostart, setAutostart] = useState<boolean>(true);
   const [monthlyNotification, setMonthlyNotification] = useState<boolean>(true);
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState<boolean>(
+    initialSettings["auto_check_updates"] !== undefined
+      ? initialSettings["auto_check_updates"] !== "0"
+      : true
+  );
   const [minimizeTray, setMinimizeTray] = useState<boolean>(true);
 
   const totalSteps = 5;
@@ -275,6 +280,7 @@ export default function OobeWizard({ initialSettings, onComplete }: OobeWizardPr
       break_snooze: "10",
       autostart: autostart ? "1" : "0",
       monthly_notification: monthlyNotification ? "1" : "0",
+      auto_check_updates: autoCheckUpdates ? "1" : "0",
       minimize_tray: minimizeTray ? "1" : "0",
       ignore_system_ui: "1",
       ignore_lockapp: "1",
@@ -1188,6 +1194,49 @@ export default function OobeWizard({ initialSettings, onComplete }: OobeWizardPr
                   <M3Switch
                     selected={minimizeTray}
                     onChange={(val) => setMinimizeTray(val)}
+                  />
+                </div>
+
+                <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "0 20px" }} />
+
+                {/* Automatic Updates */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "16px 20px",
+                    gap: 16,
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className="material-symbols-rounded" style={{ fontSize: 20, color: "var(--md-sys-color-primary)" }}>
+                        system_update
+                      </span>
+                      <span className="md-typescale-title-medium" style={{ color: "var(--md-sys-color-on-surface)", fontWeight: 600 }}>
+                        Automatic Updates
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 8,
+                          background: "var(--md-sys-color-primary-container)",
+                          color: "var(--md-sys-color-on-primary-container)",
+                        }}
+                      >
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="md-typescale-body-small" style={{ color: "var(--md-sys-color-on-surface-variant)", margin: "4px 0 0 0" }}>
+                      Automatically check GitHub for new versions on startup. Can be disabled for 100% offline privacy.
+                    </p>
+                  </div>
+                  <M3Switch
+                    selected={autoCheckUpdates}
+                    onChange={(val) => setAutoCheckUpdates(val)}
                   />
                 </div>
               </div>
