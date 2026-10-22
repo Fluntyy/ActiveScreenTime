@@ -596,7 +596,7 @@ export default function App() {
   const [chartEndDateStr, setChartEndDateStr] = useState<string>(
     formatLocalDate(),
   );
-  const [appVersion, setAppVersion] = useState("0.1.1");
+  const [appVersion, setAppVersion] = useState("0.1.2");
   const lastKnownDayRef = useRef<string>(formatLocalDate());
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const dateWrapperRef = useRef<HTMLDivElement>(null);
