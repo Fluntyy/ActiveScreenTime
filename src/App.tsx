@@ -566,6 +566,257 @@ interface DownloadProgress {
   total: number;
 }
 
+function parseInlineMarkdown(text: string): React.ReactNode[] {
+  const tokens: React.ReactNode[] = [];
+  let remaining = text;
+  let key = 0;
+
+  while (remaining.length > 0) {
+    // Bold: **text** or __text__
+    const boldMatch = remaining.match(/^(\*\*|__)(.*?)\1/);
+    if (boldMatch) {
+      tokens.push(
+        <strong
+          key={key++}
+          style={{ fontWeight: 600, color: "var(--md-sys-color-on-surface)" }}
+        >
+          {parseInlineMarkdown(boldMatch[2])}
+        </strong>,
+      );
+      remaining = remaining.slice(boldMatch[0].length);
+      continue;
+    }
+
+    // Inline code: `code`
+    const codeMatch = remaining.match(/^`([^`]+)`/);
+    if (codeMatch) {
+      tokens.push(
+        <code
+          key={key++}
+          style={{
+            fontFamily: "JetBrains Mono, monospace",
+            fontSize: "0.85em",
+            padding: "2px 5px",
+            borderRadius: 4,
+            background:
+              "var(--md-sys-color-surface-container-high, rgba(128,128,128,0.15))",
+            color: "var(--md-sys-color-primary)",
+          }}
+        >
+          {codeMatch[1]}
+        </code>,
+      );
+      remaining = remaining.slice(codeMatch[0].length);
+      continue;
+    }
+
+    // Links: [text](url)
+    const linkMatch = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
+    if (linkMatch) {
+      tokens.push(
+        <a
+          key={key++}
+          href={linkMatch[2]}
+          onClick={(e) => {
+            e.preventDefault();
+            invoke("open_external_url", { url: linkMatch[2] }).catch(() => {});
+          }}
+          style={{
+            color: "var(--md-sys-color-primary)",
+            textDecoration: "underline",
+            cursor: "pointer",
+          }}
+        >
+          {linkMatch[1]}
+        </a>,
+      );
+      remaining = remaining.slice(linkMatch[0].length);
+      continue;
+    }
+
+    // Italic: *text* or _text_
+    const italicMatch = remaining.match(/^(\*|_)([^*_]+)\1/);
+    if (italicMatch) {
+      tokens.push(<em key={key++}>{italicMatch[2]}</em>);
+      remaining = remaining.slice(italicMatch[0].length);
+      continue;
+    }
+
+    // Normal text until next special token
+    const nextSpecial = remaining.search(/(\*\*|__|`|\[|\*|_)/);
+    if (nextSpecial === -1) {
+      tokens.push(remaining);
+      break;
+    } else if (nextSpecial === 0) {
+      tokens.push(remaining[0]);
+      remaining = remaining.slice(1);
+    } else {
+      tokens.push(remaining.slice(0, nextSpecial));
+      remaining = remaining.slice(nextSpecial);
+    }
+  }
+
+  return tokens;
+}
+
+function MarkdownChangelog({ content }: { content: string }) {
+  if (!content) return <span>No changelog provided.</span>;
+
+  const lines = content.split(/\r?\n/);
+  const elements: React.ReactNode[] = [];
+  let key = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+
+    if (!line) {
+      elements.push(<div key={key++} style={{ height: 6 }} />);
+      continue;
+    }
+
+    // Headings
+    if (line.startsWith("#### ")) {
+      elements.push(
+        <div
+          key={key++}
+          style={{
+            fontWeight: 700,
+            fontSize: 13,
+            color: "var(--md-sys-color-on-surface)",
+            marginTop: 8,
+            marginBottom: 2,
+          }}
+        >
+          {parseInlineMarkdown(line.slice(5))}
+        </div>,
+      );
+      continue;
+    }
+    if (line.startsWith("### ")) {
+      elements.push(
+        <div
+          key={key++}
+          style={{
+            fontWeight: 700,
+            fontSize: 14,
+            color: "var(--md-sys-color-on-surface)",
+            marginTop: 10,
+            marginBottom: 4,
+          }}
+        >
+          {parseInlineMarkdown(line.slice(4))}
+        </div>,
+      );
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      elements.push(
+        <div
+          key={key++}
+          style={{
+            fontWeight: 700,
+            fontSize: 15,
+            color: "var(--md-sys-color-on-surface)",
+            marginTop: 12,
+            marginBottom: 4,
+          }}
+        >
+          {parseInlineMarkdown(line.slice(3))}
+        </div>,
+      );
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      elements.push(
+        <div
+          key={key++}
+          style={{
+            fontWeight: 700,
+            fontSize: 16,
+            color: "var(--md-sys-color-on-surface)",
+            marginTop: 12,
+            marginBottom: 6,
+          }}
+        >
+          {parseInlineMarkdown(line.slice(2))}
+        </div>,
+      );
+      continue;
+    }
+
+    // Bullet points: - or *
+    if (/^[-*]\s+/.test(line)) {
+      const bulletText = line.replace(/^[-*]\s+/, "");
+      elements.push(
+        <div
+          key={key++}
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            marginBottom: 4,
+            lineHeight: 1.5,
+          }}
+        >
+          <span
+            style={{
+              color: "var(--md-sys-color-primary)",
+              lineHeight: 1.5,
+              fontSize: 15,
+              userSelect: "none",
+            }}
+          >
+            •
+          </span>
+          <div style={{ flex: 1 }}>{parseInlineMarkdown(bulletText)}</div>
+        </div>,
+      );
+      continue;
+    }
+
+    // Numbered list: 1. ...
+    const numMatch = line.match(/^(\d+)\.\s+(.*)/);
+    if (numMatch) {
+      elements.push(
+        <div
+          key={key++}
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 6,
+            marginBottom: 4,
+            lineHeight: 1.5,
+          }}
+        >
+          <span
+            style={{
+              color: "var(--md-sys-color-primary)",
+              fontWeight: 600,
+              fontSize: 12,
+              userSelect: "none",
+              minWidth: 16,
+            }}
+          >
+            {numMatch[1]}.
+          </span>
+          <div style={{ flex: 1 }}>{parseInlineMarkdown(numMatch[2])}</div>
+        </div>,
+      );
+      continue;
+    }
+
+    // Regular line / paragraph
+    elements.push(
+      <div key={key++} style={{ marginBottom: 4, lineHeight: 1.5 }}>
+        {parseInlineMarkdown(line)}
+      </div>,
+    );
+  }
+
+  return <div>{elements}</div>;
+}
+
 // ── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -3227,7 +3478,6 @@ export default function App() {
           style={{
             maxHeight: "65vh",
             overflowY: "auto",
-            paddingRight: 4,
             userSelect: "none",
             WebkitUserSelect: "none",
           }}
@@ -3323,13 +3573,11 @@ export default function App() {
                     maxHeight: "26vh",
                     overflowY: "auto",
                     fontSize: 13,
-                    lineHeight: 1.5,
                     color: "var(--md-sys-color-on-surface)",
-                    whiteSpace: "pre-wrap",
                     border: "1px solid var(--md-sys-color-outline-variant)",
                   }}
                 >
-                  {updateInfo.changelog || "No changelog provided."}
+                  <MarkdownChangelog content={updateInfo.changelog} />
                 </div>
               </div>
 
