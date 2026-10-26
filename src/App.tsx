@@ -957,7 +957,20 @@ export default function App() {
       if (match) match.secs = s;
     }
 
-    setHistory(last7Days);
+    setHistory((prev) => {
+      if (
+        prev.length === last7Days.length &&
+        prev.every(
+          (p, i) =>
+            p.dateStr === last7Days[i].dateStr &&
+            p.secs === last7Days[i].secs &&
+            p.name === last7Days[i].name,
+        )
+      ) {
+        return prev;
+      }
+      return last7Days;
+    });
   }, [selectedDate, selectedApp, chartEndDateStr]);
 
   // ── Load settings once ────────────────────────────────────────────────────
@@ -1201,6 +1214,8 @@ export default function App() {
   const isCurrentWeek = chartEndDateStr >= todayStr;
 
   function goPrevWeek() {
+    setHoverData(null);
+    hoverIndexRef.current = null;
     const parts = chartEndDateStr.split("-");
     const d = new Date(
       Number(parts[0]),
@@ -1215,6 +1230,8 @@ export default function App() {
   }
 
   function goNextWeek() {
+    setHoverData(null);
+    hoverIndexRef.current = null;
     const parts = chartEndDateStr.split("-");
     const d = new Date(
       Number(parts[0]),
@@ -1958,7 +1975,6 @@ export default function App() {
                           </AnimatePresence>
                           <ResponsiveContainer width="100%" height="100%">
                             <BarChart
-                              key={chartEndDateStr + (selectedApp || "")}
                               data={history}
                               margin={{ top: 4, right: 4, bottom: 0, left: 4 }}
                               style={{ cursor: "pointer" }}
@@ -2027,7 +2043,10 @@ export default function App() {
                               <Bar
                                 dataKey="secs"
                                 radius={[6, 6, 0, 0]}
-                                isAnimationActive={false}
+                                isAnimationActive={true}
+                                animationDuration={400}
+                                animationEasing="ease-out"
+                                animationBegin={0}
                                 style={{ cursor: "pointer" }}
                                 onClick={(data: any) => {
                                   const dateStr =
@@ -2053,7 +2072,7 @@ export default function App() {
 
                                   return (
                                     <Cell
-                                      key={entry.dateStr}
+                                      key={`c-${i}`}
                                       fill={fill}
                                       style={{ transition: "fill 0.2s ease" }}
                                     />
